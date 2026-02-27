@@ -1,0 +1,1 @@
+﻿LEGACY POS (Static). Production moved to ipharmegy-pos-v2.
