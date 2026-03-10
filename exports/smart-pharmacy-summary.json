@@ -1,0 +1,6 @@
+{
+  "sales": { "total": 427378.52, "profit": 122378.34, "rows": 12442 },
+  "expiry": { "expired": 20, "expiring30": 6, "expiring90": 11 },
+  "reorder": { "count": 0 },
+  "velocity": { "items": 2984, "fast": 0, "normal": 3, "slow": 2981 }
+}
