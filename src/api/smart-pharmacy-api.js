@@ -60,6 +60,90 @@ function parseLimit(value, fallback = 20) {
   return n;
 }
 
+function buildMockCatalog(summaryData) {
+  const catalog = {};
+
+  const topSelling = arrayOrEmpty(summaryData?.topSelling);
+  const smartReorder = arrayOrEmpty(summaryData?.smartReorder);
+  const slowMoving = arrayOrEmpty(summaryData?.slowMoving);
+
+  topSelling.forEach((item) => {
+    const productId = String(item.product_id ?? "");
+    if (!productId) return;
+
+    const totalQty = Number(item.total_sold_qty || 0);
+    const totalSales = Number(item.total_sales_value || 0);
+    const unitPrice = totalQty > 0 ? totalSales / totalQty : 0;
+
+    catalog[productId] = {
+      barcode: productId,
+      product_id: item.product_id,
+      name: item.product_name_ar || `Product ${productId}`,
+      price: Number(unitPrice.toFixed(2)),
+      source: "topSelling",
+    };
+  });
+
+  smartReorder.forEach((item) => {
+    const productId = String(item.product_id ?? "");
+    if (!productId || catalog[productId]) return;
+
+    catalog[productId] = {
+      barcode: productId,
+      product_id: item.product_id,
+      name: item.product_name_ar || `Product ${productId}`,
+      price: 10,
+      source: "smartReorder",
+    };
+  });
+
+  slowMoving.forEach((item) => {
+    const productId = String(item.product_id ?? "");
+    if (!productId || catalog[productId]) return;
+
+    catalog[productId] = {
+      barcode: productId,
+      product_id: item.product_id,
+      name: item.product_name_ar || `Product ${productId}`,
+      price: 10,
+      source: "slowMoving",
+    };
+  });
+
+  // Mock barcodes for easy manual testing
+  if (!catalog["123"]) {
+    catalog["123"] = {
+      barcode: "123",
+      product_id: 123,
+      name: "Panadol",
+      price: 5,
+      source: "mock",
+    };
+  }
+
+  if (!catalog["456"]) {
+    catalog["456"] = {
+      barcode: "456",
+      product_id: 456,
+      name: "Cetaphil",
+      price: 20,
+      source: "mock",
+    };
+  }
+
+  if (!catalog["789"]) {
+    catalog["789"] = {
+      barcode: "789",
+      product_id: 789,
+      name: "Biomil Milk",
+      price: 35,
+      source: "mock",
+    };
+  }
+
+  return catalog;
+}
+
 app.get("/", (req, res) => {
   res.status(200).json({
     ok: true,
@@ -312,6 +396,33 @@ app.get("/api/intelligence/smart-reorder/taif-main", (req, res) => {
   });
 });
 
+// ========================================
+// ITEM LOOKUP FOR POS
+// ========================================
+app.get("/api/item/:barcode", (req, res) => {
+  const { barcode } = req.params;
+  const summary = safeReadSummary();
+
+  const catalog = buildMockCatalog(summary.data || {});
+  const item = catalog[String(barcode)];
+
+  if (!item) {
+    return res.status(404).json({
+      ok: false,
+      message: "Item not found",
+      barcode,
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    ...item,
+  });
+});
+
+// ========================================
+// SAVE SALE (demo / v1 local persistence)
+// ========================================
 app.post("/api/sale", (req, res) => {
   try {
     const sale = req.body || {};
