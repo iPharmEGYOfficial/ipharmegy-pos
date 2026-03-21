@@ -226,12 +226,12 @@ function readSavedSales(limit = 20) {
           const cart = Array.isArray(sale.cart) ? sale.cart : [];
           const totalSales =
             toNumber(sale.total) ||
-            cart.reduce(
-              (sum, item) =>
-                sum +
-                toNumber(item.total ?? item.price * item.qty ?? 0),
-              0
-            );
+            cart.reduce((sum, item) => {
+              const itemTotal =
+                item.total ??
+                toNumber(item.price, 0) * toNumber(item.qty, 0);
+              return sum + toNumber(itemTotal, 0);
+            }, 0);
 
           return {
             invoiceId: sale.saleId || path.basename(filePath, ".json"),
@@ -260,12 +260,16 @@ function readSavedSales(limit = 20) {
 
 function buildFallbackRecentSales(summaryData, limit = 5) {
   const dailySales = arrayOrEmpty(summaryData?.dailySales);
+
   if (dailySales.length > 0) {
     return dailySales.slice(0, limit).map((item, i) => ({
       invoiceId: item.invoiceId || item.day || item.date || `DS-${i + 1}`,
       saleDate: item.date || item.day || null,
       customerName: null,
-      totalSales: toNumber(item.total_sales_value ?? item.totalSales ?? item.sales, 0),
+      totalSales: toNumber(
+        item.total_sales_value ?? item.totalSales ?? item.sales,
+        0
+      ),
       estimatedProfit: toNumber(
         item.estimated_profit ?? item.estimatedProfit ?? item.profit,
         0
@@ -275,6 +279,7 @@ function buildFallbackRecentSales(summaryData, limit = 5) {
   }
 
   const topSelling = arrayOrEmpty(summaryData?.topSelling);
+
   return topSelling.slice(0, limit).map((item, i) => ({
     invoiceId: 1000 + i,
     saleDate: null,
@@ -300,6 +305,7 @@ app.get("/", (req, res) => {
     port: PORT,
     status: "running",
     sourceFile: SUMMARY_FILE,
+    salesDir: SALES_DIR,
   });
 });
 
