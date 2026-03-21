@@ -9,6 +9,7 @@ const PORT = 4015;
 const EXPORTS_DIR = path.join(__dirname, "..", "..", "exports");
 const SUMMARY_FILE = path.join(EXPORTS_DIR, "smart-pharmacy-summary.json");
 const SALES_DIR = path.join(EXPORTS_DIR, "sales");
+const TENANT_CODE = "taif-main";
 
 app.use(cors());
 app.use(express.json());
@@ -21,7 +22,7 @@ function safeReadSummary() {
         source: "missing-file",
         file: SUMMARY_FILE,
         generatedAt: null,
-        data: null,
+        data: null
       };
     }
 
@@ -33,7 +34,7 @@ function safeReadSummary() {
       source: "json-export",
       file: SUMMARY_FILE,
       generatedAt: parsed.generatedAt || null,
-      data: parsed,
+      data: parsed
     };
   } catch (error) {
     return {
@@ -42,7 +43,7 @@ function safeReadSummary() {
       file: SUMMARY_FILE,
       generatedAt: null,
       error: error.message,
-      data: null,
+      data: null
     };
   }
 }
@@ -86,7 +87,7 @@ function buildMockCatalog(summaryData) {
       product_id: item.product_id ?? item.CLS_ID ?? productId,
       name: item.product_name_ar || item.ItemNameAr || `Product ${productId}`,
       price: Number(unitPrice.toFixed(2)),
-      source: "topSelling",
+      source: "topSelling"
     };
   });
 
@@ -99,7 +100,7 @@ function buildMockCatalog(summaryData) {
       product_id: item.product_id,
       name: item.product_name_ar || `Product ${productId}`,
       price: 10,
-      source: "smartReorder",
+      source: "smartReorder"
     };
   });
 
@@ -112,7 +113,7 @@ function buildMockCatalog(summaryData) {
       product_id: item.product_id,
       name: item.product_name_ar || `Product ${productId}`,
       price: 10,
-      source: "slowMoving",
+      source: "slowMoving"
     };
   });
 
@@ -122,7 +123,7 @@ function buildMockCatalog(summaryData) {
       product_id: 123,
       name: "Panadol",
       price: 5,
-      source: "mock",
+      source: "mock"
     };
   }
 
@@ -132,7 +133,7 @@ function buildMockCatalog(summaryData) {
       product_id: 456,
       name: "Cetaphil",
       price: 20,
-      source: "mock",
+      source: "mock"
     };
   }
 
@@ -142,7 +143,7 @@ function buildMockCatalog(summaryData) {
       product_id: 789,
       name: "Biomil Milk",
       price: 35,
-      source: "mock",
+      source: "mock"
     };
   }
 
@@ -156,32 +157,32 @@ function getDashboardSummary(summaryData) {
     return {
       totalOrders: toNumber(
         dashboard.total_orders ??
-          dashboard.totalOrders ??
-          dashboard.orders ??
-          0
+        dashboard.totalOrders ??
+        dashboard.orders ??
+        0
       ),
       totalSales: toNumber(
         dashboard.total_sales_value ??
-          dashboard.totalSales ??
-          dashboard.sales ??
-          0
+        dashboard.totalSales ??
+        dashboard.sales ??
+        0
       ),
       estimatedProfit: toNumber(
         dashboard.estimated_total_profit ??
-          dashboard.estimatedProfit ??
-          dashboard.profit ??
-          0
+        dashboard.estimatedProfit ??
+        dashboard.profit ??
+        0
       ),
       deadStock: toNumber(
         dashboard.dead_stock_count ??
-          dashboard.deadStock ??
-          0
+        dashboard.deadStock ??
+        0
       ),
       lowStock: toNumber(
         dashboard.low_stock_risk_count ??
-          dashboard.lowStock ??
-          0
-      ),
+        dashboard.lowStock ??
+        0
+      )
     };
   }
 
@@ -202,7 +203,7 @@ function getDashboardSummary(summaryData) {
     totalSales,
     estimatedProfit: 0,
     deadStock: arrayOrEmpty(summaryData?.deadStock).length,
-    lowStock: arrayOrEmpty(summaryData?.lowStockRisk).length,
+    lowStock: arrayOrEmpty(summaryData?.lowStockRisk).length
   };
 }
 
@@ -239,7 +240,7 @@ function readSavedSales(limit = 20) {
             customerName: sale.customerName || null,
             totalSales,
             estimatedProfit: toNumber(sale.estimatedProfit, 0),
-            source: "saved-sale",
+            source: "saved-sale"
           };
         } catch {
           return null;
@@ -274,7 +275,7 @@ function buildFallbackRecentSales(summaryData, limit = 5) {
         item.estimated_profit ?? item.estimatedProfit ?? item.profit,
         0
       ),
-      source: "dailySales",
+      source: "dailySales"
     }));
   }
 
@@ -286,7 +287,7 @@ function buildFallbackRecentSales(summaryData, limit = 5) {
     customerName: null,
     totalSales: toNumber(item.total_sales_value ?? item.TotalSales, 0),
     estimatedProfit: 0,
-    source: "topSelling-fallback",
+    source: "topSelling-fallback"
   }));
 }
 
@@ -302,10 +303,11 @@ app.get("/", (req, res) => {
   res.status(200).json({
     ok: true,
     app: "iPharmEGY POS Smart Pharmacy API",
+    tenantCode: TENANT_CODE,
     port: PORT,
     status: "running",
     sourceFile: SUMMARY_FILE,
-    salesDir: SALES_DIR,
+    salesDir: SALES_DIR
   });
 });
 
@@ -315,10 +317,11 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({
     ok: true,
     app: "iPharmEGY POS Smart Pharmacy API",
+    tenantCode: TENANT_CODE,
     status: "online",
     summaryAvailable: summary.ok,
     source: summary.source,
-    generatedAt: summary.generatedAt,
+    generatedAt: summary.generatedAt
   });
 });
 
@@ -330,7 +333,7 @@ app.get("/api/smart-summary", (req, res) => {
       ok: false,
       status: "ERROR",
       message: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -347,19 +350,19 @@ app.get("/api/smart-summary", (req, res) => {
     estimatedProfit: base.estimatedProfit,
     deadStock: base.deadStock,
     lowStock: base.lowStock,
-    topSelling,
+    topSelling
   });
 });
 
-app.get("/api/intelligence/dashboard/taif-main", (req, res) => {
+app.get(`/api/intelligence/dashboard/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(500).json({
       ok: false,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       error: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -367,22 +370,22 @@ app.get("/api/intelligence/dashboard/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/top-selling/taif-main", (req, res) => {
+app.get(`/api/intelligence/top-selling/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(500).json({
       ok: false,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       error: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -391,25 +394,25 @@ app.get("/api/intelligence/top-selling/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/recent-sales/taif-main", (req, res) => {
+app.get(`/api/intelligence/recent-sales/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(200).json({
       ok: true,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       count: 0,
       source: summary.source,
       generatedAt: summary.generatedAt,
-      data: [],
+      data: []
     });
   }
 
@@ -418,23 +421,23 @@ app.get("/api/intelligence/recent-sales/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: data.length > 0 ? data[0].source : summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/dead-stock/taif-main", (req, res) => {
+app.get(`/api/intelligence/dead-stock/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(500).json({
       ok: false,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       error: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -443,23 +446,23 @@ app.get("/api/intelligence/dead-stock/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/low-stock/taif-main", (req, res) => {
+app.get(`/api/intelligence/low-stock/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(500).json({
       ok: false,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       error: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -468,23 +471,23 @@ app.get("/api/intelligence/low-stock/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/profitability/taif-main", (req, res) => {
+app.get(`/api/intelligence/profitability/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(500).json({
       ok: false,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       error: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -493,23 +496,23 @@ app.get("/api/intelligence/profitability/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/daily-sales/taif-main", (req, res) => {
+app.get(`/api/intelligence/daily-sales/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(500).json({
       ok: false,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       error: "smart-pharmacy-summary.json is missing or unreadable",
-      details: summary,
+      details: summary
     });
   }
 
@@ -518,25 +521,25 @@ app.get("/api/intelligence/daily-sales/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/expiry-risk/taif-main", (req, res) => {
+app.get(`/api/intelligence/expiry-risk/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(200).json({
       ok: true,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       count: 0,
       source: summary.source,
       generatedAt: summary.generatedAt,
-      data: [],
+      data: []
     });
   }
 
@@ -545,25 +548,25 @@ app.get("/api/intelligence/expiry-risk/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/slow-moving/taif-main", (req, res) => {
+app.get(`/api/intelligence/slow-moving/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(200).json({
       ok: true,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       count: 0,
       source: summary.source,
       generatedAt: summary.generatedAt,
-      data: [],
+      data: []
     });
   }
 
@@ -572,25 +575,25 @@ app.get("/api/intelligence/slow-moving/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-app.get("/api/intelligence/smart-reorder/taif-main", (req, res) => {
+app.get(`/api/intelligence/smart-reorder/${TENANT_CODE}`, (req, res) => {
   const summary = safeReadSummary();
 
   if (!summary.ok || !summary.data) {
     return res.status(200).json({
       ok: true,
-      tenantCode: "taif-main",
+      tenantCode: TENANT_CODE,
       count: 0,
       source: summary.source,
       generatedAt: summary.generatedAt,
-      data: [],
+      data: []
     });
   }
 
@@ -599,17 +602,14 @@ app.get("/api/intelligence/smart-reorder/taif-main", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    tenantCode: "taif-main",
+    tenantCode: TENANT_CODE,
     count: data.length,
     source: summary.source,
     generatedAt: summary.generatedAt,
-    data,
+    data
   });
 });
 
-// ========================================
-// ITEM LOOKUP FOR POS
-// ========================================
 app.get("/api/item/:barcode", (req, res) => {
   const { barcode } = req.params;
   const summary = safeReadSummary();
@@ -621,19 +621,16 @@ app.get("/api/item/:barcode", (req, res) => {
     return res.status(404).json({
       ok: false,
       message: "Item not found",
-      barcode,
+      barcode
     });
   }
 
   return res.status(200).json({
     ok: true,
-    ...item,
+    ...item
   });
 });
 
-// ========================================
-// SAVE SALE (demo / v1 local persistence)
-// ========================================
 app.post("/api/sale", (req, res) => {
   try {
     const sale = req.body || {};
@@ -647,7 +644,7 @@ app.post("/api/sale", (req, res) => {
     const payload = {
       saleId,
       createdAt: new Date().toISOString(),
-      ...sale,
+      ...sale
     };
 
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
@@ -663,7 +660,7 @@ app.post("/api/sale", (req, res) => {
       success: true,
       message: "Sale saved successfully",
       saleId,
-      filePath,
+      filePath
     });
   } catch (error) {
     console.error("SALE SAVE ERROR:", error);
@@ -671,7 +668,7 @@ app.post("/api/sale", (req, res) => {
       ok: false,
       success: false,
       message: "Failed to save sale",
-      error: error.message,
+      error: error.message
     });
   }
 });
@@ -680,6 +677,7 @@ app.listen(PORT, () => {
   console.log("===================================");
   console.log("SMART PHARMACY API RUNNING");
   console.log(`http://127.0.0.1:${PORT}`);
+  console.log(`Tenant code: ${TENANT_CODE}`);
   console.log(`Summary file: ${SUMMARY_FILE}`);
   console.log(`Sales dir: ${SALES_DIR}`);
   console.log("===================================");
