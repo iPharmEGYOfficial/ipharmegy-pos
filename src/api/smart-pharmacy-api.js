@@ -108,6 +108,122 @@ function firstExistingColumn(columns, candidates) {
   return null;
 }
 
+async function resolveTopSelling(pool, detailTable, classesTable) {
+  if (!detailTable || !classesTable) {
+    return {
+      topSelling: [],
+      detected: {
+        detailTable,
+        classesTable
+      }
+    };
+  }
+
+  const detailCols = await getColumns(pool, detailTable);
+  const classCols = await getColumns(pool, classesTable);
+
+  const detailProductCol = firstExistingColumn(detailCols, [
+    "CLS_ID",
+    "CLASS_ID",
+    "ITEM_ID",
+    "PRODUCT_ID"
+  ]);
+
+  const detailQtyCol = firstExistingColumn(detailCols, [
+    "SP_SD_QTY",
+    "SP_SD_QNT",
+    "SP_SD_QLT",
+    "QTY",
+    "SP_QTY",
+    "QTY1",
+    "ITEM_QTY",
+    "QUANTITY"
+  ]);
+
+  const detailSalesCol = firstExistingColumn(detailCols, [
+    "SP_SD_TOT_FORIGNVALUE",
+    "TOTAL",
+    "SP_TOTAL",
+    "TOTAL_VALUE",
+    "NET_VALUE",
+    "FORIGNVALUE",
+    "TOT_FORIGNVALUE"
+  ]);
+
+  const detailProfitCol = firstExistingColumn(detailCols, [
+    "SP_SD_INC_REBH",
+    "SP_SD_REBH",
+    "PROFIT",
+    "SP_PROFIT",
+    "REBH",
+    "INC_REBH"
+  ]);
+
+  const classIdCol = firstExistingColumn(classCols, [
+    "CLS_ID",
+    "CLASS_ID",
+    "ITEM_ID",
+    "PRODUCT_ID"
+  ]);
+
+  const classNameCol = firstExistingColumn(classCols, [
+    "CLS_ARNAME",
+    "CLS_ENNAME",
+    "NAME",
+    "CLS_DESC",
+    "ITEMNAME",
+    "ITEM_NAME",
+    "CLASS_NAME"
+  ]);
+
+  if (!detailProductCol || !detailQtyCol || !detailSalesCol || !classIdCol || !classNameCol) {
+    return {
+      topSelling: [],
+      detected: {
+        detailTable,
+        classesTable,
+        detailProductCol,
+        detailQtyCol,
+        detailSalesCol,
+        detailProfitCol,
+        classIdCol,
+        classNameCol
+      }
+    };
+  }
+
+  const topSql = `
+    SELECT TOP 10
+      d.[${detailProductCol}] AS product_id,
+      c.[${classNameCol}] AS product_name_ar,
+      SUM(ISNULL(d.[${detailQtyCol}], 0)) AS total_sold_qty,
+      SUM(ISNULL(d.[${detailSalesCol}], 0)) AS total_sales_value,
+      SUM(ISNULL(d.[${detailProfitCol || detailSalesCol}], 0)) AS estimated_profit
+    FROM [${detailTable}] d
+    LEFT JOIN [${classesTable}] c
+      ON c.[${classIdCol}] = d.[${detailProductCol}]
+    WHERE d.[${detailProductCol}] IS NOT NULL
+    GROUP BY d.[${detailProductCol}], c.[${classNameCol}]
+    ORDER BY SUM(ISNULL(d.[${detailQtyCol}], 0)) DESC
+  `;
+
+  const topResult = await pool.request().query(topSql);
+
+  return {
+    topSelling: topResult.recordset || [],
+    detected: {
+      detailTable,
+      classesTable,
+      detailProductCol,
+      detailQtyCol,
+      detailSalesCol,
+      detailProfitCol,
+      classIdCol,
+      classNameCol
+    }
+  };
+}
+
 // =========================
 // BASIC TEST
 // =========================
@@ -222,9 +338,12 @@ app.get("/api/smart-summary", async (req, res) => {
       "BILLS"
     ]);
 
-    const detailTable = await firstExistingTable(pool, [
+    const primaryDetailTable = await firstExistingTable(pool, [
       "SAL_POINT_INV_DET",
-      "SAL_POINT_DTL",
+      "SAL_POINT_DTL"
+    ]);
+
+    const altDetailTable = await firstExistingTable(pool, [
       "SAL_POINT_DETAIL_CLASS"
     ]);
 
@@ -239,8 +358,6 @@ app.get("/api/smart-summary", async (req, res) => {
     }
 
     const headerCols = await getColumns(pool, headerTable);
-    const detailCols = detailTable ? await getColumns(pool, detailTable) : [];
-    const classCols = classesTable ? await getColumns(pool, classesTable) : [];
 
     // ---------
     // Detect header columns
@@ -293,91 +410,24 @@ app.get("/api/smart-summary", async (req, res) => {
     const summary = summaryResult.recordset[0] || {};
 
     // ---------
-    // Top selling from detail + classes if possible
+    // Top selling
     // ---------
     let topSelling = [];
+    let topSellingDetected = null;
+    let detailTableUsed = null;
 
-    if (detailTable && classesTable) {
-      const detailProductCol = firstExistingColumn(detailCols, [
-        "CLS_ID",
-        "CLASS_ID",
-        "ITEM_ID",
-        "PRODUCT_ID"
-      ]);
+    if (primaryDetailTable && classesTable) {
+      const primaryTop = await resolveTopSelling(pool, primaryDetailTable, classesTable);
+      topSelling = primaryTop.topSelling;
+      topSellingDetected = primaryTop.detected;
+      detailTableUsed = primaryDetailTable;
+    }
 
-      const detailQtyCol = firstExistingColumn(detailCols, [
-        "QTY",
-        "SP_QTY",
-        "QTY1",
-        "ITEM_QTY",
-        "QUANTITY"
-      ]);
-
-      const detailSalesCol = firstExistingColumn(detailCols, [
-        "TOTAL",
-        "SP_TOTAL",
-        "TOTAL_VALUE",
-        "NET_VALUE",
-        "FORIGNVALUE",
-        "TOT_FORIGNVALUE"
-      ]);
-
-      const detailProfitCol = firstExistingColumn(detailCols, [
-        "PROFIT",
-        "SP_PROFIT",
-        "REBH"
-      ]);
-
-      const detailHeaderIdCol = firstExistingColumn(detailCols, [
-        "SP_S_ID",
-        "INV_ID",
-        "ID_H",
-        "HEADER_ID"
-      ]);
-
-      const classIdCol = firstExistingColumn(classCols, [
-        "CLS_ID",
-        "CLASS_ID",
-        "ITEM_ID",
-        "PRODUCT_ID"
-      ]);
-
-      const classNameCol = firstExistingColumn(classCols, [
-        "NAME",
-        "CLS_DESC",
-        "ITEMNAME",
-        "ITEM_NAME",
-        "CLASS_NAME"
-      ]);
-
-      if (
-        detailProductCol &&
-        detailQtyCol &&
-        detailSalesCol &&
-        detailHeaderIdCol &&
-        classIdCol &&
-        classNameCol &&
-        headerIdCol
-      ) {
-        const topSql = `
-  SELECT TOP 10
-    d.CLS_ID AS product_id,
-    c.CLS_ARNAME AS product_name_ar,
-    SUM(ISNULL(d.SP_SD_QTY, 0)) AS total_sold_qty,
-    SUM(ISNULL(d.SP_SD_TOT_FORIGNVALUE, 0)) AS total_sales_value,
-    SUM(ISNULL(d.SP_SD_INC_REBH, 0)) AS estimated_profit
-  FROM SAL_POINT_INV_DET d
-  LEFT JOIN SAL_POINT_INV h
-    ON h.SP_S_ID = d.SP_S_ID
-  LEFT JOIN CLASSES c
-    ON c.CLS_ID = d.CLS_ID
-  GROUP BY d.CLS_ID, c.CLS_ARNAME
-  ORDER BY SUM(ISNULL(d.SP_SD_QTY, 0)) DESC
-`;
-
-        const topResult = await pool.request().query(topSql);
-        topSelling = topResult.recordset || [];
-      }
+    if ((!topSelling || topSelling.length === 0) && altDetailTable && classesTable) {
+      const altTop = await resolveTopSelling(pool, altDetailTable, classesTable);
+      topSelling = altTop.topSelling;
+      topSellingDetected = altTop.detected;
+      detailTableUsed = altDetailTable;
     }
 
     // ---------
@@ -406,7 +456,9 @@ app.get("/api/smart-summary", async (req, res) => {
       const minQtyCol = firstExistingColumn(invCols, [
         "MIN_QTY",
         "MINIMUM_QTY",
-        "REORDER_QTY"
+        "REORDER_QTY",
+        "CLS_MIN_LIMIT",
+        "CLS_MIN_LIMIT_ST"
       ]);
 
       if (invQtyCol) {
@@ -439,9 +491,18 @@ app.get("/api/smart-summary", async (req, res) => {
       sqlConnected: true,
       tables: {
         headerTable,
-        detailTable,
+        detailTable: detailTableUsed,
+        primaryDetailTable,
+        altDetailTable,
         classesTable,
         inventoryTable
+      },
+      detected: {
+        headerIdCol,
+        headerDateCol,
+        headerSalesCol,
+        headerProfitCol,
+        topSellingDetected
       },
       totalSales: toNumber(summary.total_sales, 0),
       estimatedProfit: toNumber(summary.total_profit, 0),
