@@ -5,6 +5,7 @@
   "dependencies": {
     "@ipharmegy/core": "file:../ipharmegy-core",
     "cors": "^2.8.6",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "mssql": "^12.2.1"
   }
 }
