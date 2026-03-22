@@ -15,7 +15,7 @@ const SUMMARY_FILE = path.join(EXPORTS_DIR, "smart-pharmacy-summary.json");
 
 const sqlConfig = {
   connectionString:
-    "Driver={SQL Server Native Client 11.0};Server=DESKTOP-FOKGJSF\\SQLEXPRESS;Database=AMANSOFTS_PLUS;Trusted_Connection=Yes;",
+    "Driver={SQL Server Native Client 11.0};Server=DESKTOP-FOKGJSF\\SQLEXPRESS;Database=D:\\DB_SPOIN\\AMANSOFTS_20_10_2025.MDF;Trusted_Connection=Yes;",
   driver: "msnodesqlv8"
 };
 
