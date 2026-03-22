@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
-const sql = require("mssql");
+const sql = require("mssql/msnodesqlv8");
 
 const app = express();
 const PORT = 4015;
@@ -14,18 +14,12 @@ const EXPORTS_DIR = path.join(__dirname, "..", "..", "exports");
 const SUMMARY_FILE = path.join(EXPORTS_DIR, "smart-pharmacy-summary.json");
 
 // =========================
-// SQL CONFIG
-// عدّل database إذا كان الاسم مختلفًا عندك
+// SQL CONFIG - Windows Auth
 // =========================
 const sqlConfig = {
-  server: "DESKTOP-FOKGJSF\\SQLEXPRESS",
-  database: "AMANSOFTS_PLUS",
-  options: {
-    trustServerCertificate: true
-  },
-  authentication: {
-    type: "default"
-  }
+  connectionString:
+    "Driver={SQL Server Native Client 11.0};Server=DESKTOP-FOKGJSF\\SQLEXPRESS;Database=AMANSOFTS_PLUS;Trusted_Connection=Yes;",
+  driver: "msnodesqlv8"
 };
 
 async function getSqlPool() {
@@ -106,8 +100,6 @@ app.get("/api/health", async (req, res) => {
 
 // =========================
 // SQL TEST
-// جرّب أولًا الجدول Items
-// لو اسم الجدول مختلف عندك سنعدله لاحقًا
 // =========================
 app.get("/api/sql-test", async (req, res) => {
   try {
@@ -136,52 +128,20 @@ app.get("/api/sql-test", async (req, res) => {
 
 // =========================
 // SMART SUMMARY
-// حاليًا:
-// 1) يحاول SQL Live
-// 2) لو فشل يرجع JSON fallback
+// مؤقتًا fallback من JSON
+// مع التحقق أن SQL متصل
 // =========================
 app.get("/api/smart-summary", async (req, res) => {
-  // =========
-  // 1) SQL LIVE TRY
-  // =========
+  let sqlConnected = false;
+
   try {
     const pool = await getSqlPool();
-
-    // هذه مجرد محاولة أولى عامة جدًا
-    // لو أسماء الجداول/الأعمدة مختلفة عندك سنضبطها بعد اختبار sql-test
-    const salesResult = await pool.request().query(`
-      SELECT TOP 10 *
-      FROM Items
-    `);
-
-    // لو نجح SQL لكن لسه ما عندناش استعلام summary الحقيقي
-    // نرجع success مع إشارة أن SQL متصل
-    if (salesResult.recordset) {
-      const summary = safeReadSummary();
-
-      if (summary.ok && summary.data) {
-        const dashboard = summary.data.dashboard?.[0] || {};
-
-        return res.json({
-          ok: true,
-          source: "json-fallback-with-sql-live",
-          sqlConnected: true,
-          totalSales: toNumber(dashboard.total_sales_value, 0),
-          estimatedProfit: toNumber(dashboard.estimated_total_profit, 0),
-          deadStock: toNumber(dashboard.dead_stock_count, 0),
-          lowStock: toNumber(dashboard.low_stock_risk_count, 0),
-          totalOrders: toNumber(dashboard.selling_products_count, 0),
-          topSelling: arrayOrEmpty(summary.data.topSelling)
-        });
-      }
-    }
+    await pool.request().query("SELECT 1 AS ok");
+    sqlConnected = true;
   } catch (sqlErr) {
-    console.warn("SMART SUMMARY SQL FALLBACK:", sqlErr.message);
+    console.warn("SMART SUMMARY SQL CHECK FAILED:", sqlErr.message);
   }
 
-  // =========
-  // 2) JSON FALLBACK
-  // =========
   try {
     const summary = safeReadSummary();
 
@@ -189,6 +149,7 @@ app.get("/api/smart-summary", async (req, res) => {
       return res.status(404).json({
         ok: false,
         source: "json-fallback",
+        sqlConnected,
         error: summary.error || "Summary file not found"
       });
     }
@@ -198,7 +159,8 @@ app.get("/api/smart-summary", async (req, res) => {
 
     return res.json({
       ok: true,
-      source: "json-fallback",
+      source: sqlConnected ? "json-fallback-with-sql-live" : "json-fallback",
+      sqlConnected,
       totalSales: toNumber(dashboard.total_sales_value, 0),
       estimatedProfit: toNumber(dashboard.estimated_total_profit, 0),
       deadStock: toNumber(dashboard.dead_stock_count, 0),
@@ -224,5 +186,6 @@ app.listen(PORT, () => {
   console.log(`SUMMARY_FILE: ${SUMMARY_FILE}`);
   console.log("SQL SERVER  : DESKTOP-FOKGJSF\\SQLEXPRESS");
   console.log("DATABASE    : AMANSOFTS_PLUS");
+  console.log("AUTH        : Windows Integrated");
   console.log("===================================");
 });
