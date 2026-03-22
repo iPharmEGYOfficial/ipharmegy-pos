@@ -1,4 +1,5 @@
-﻿const express = require("express");
+﻿@'
+const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -13,9 +14,6 @@ app.use(express.json());
 const EXPORTS_DIR = path.join(__dirname, "..", "..", "exports");
 const SUMMARY_FILE = path.join(EXPORTS_DIR, "smart-pharmacy-summary.json");
 
-// =========================
-// SQL CONFIG - Windows Auth
-// =========================
 const sqlConfig = {
   connectionString:
     "Driver={SQL Server Native Client 11.0};Server=DESKTOP-FOKGJSF\\SQLEXPRESS;Database=AMANSOFTS_PLUS;Trusted_Connection=Yes;",
@@ -61,9 +59,6 @@ function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
 }
 
-// =========================
-// BASIC TEST
-// =========================
 app.get("/api/ping", (req, res) => {
   res.json({
     ok: true,
@@ -72,9 +67,6 @@ app.get("/api/ping", (req, res) => {
   });
 });
 
-// =========================
-// HEALTH
-// =========================
 app.get("/api/health", async (req, res) => {
   const summary = safeReadSummary();
 
@@ -98,16 +90,17 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
-// =========================
-// SQL TEST
-// =========================
 app.get("/api/sql-test", async (req, res) => {
   try {
     const pool = await getSqlPool();
 
     const result = await pool.request().query(`
-      SELECT TOP 10 *
-      FROM Items
+      SELECT TOP 200
+        TABLE_SCHEMA,
+        TABLE_NAME
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_TYPE = 'BASE TABLE'
+      ORDER BY TABLE_SCHEMA, TABLE_NAME
     `);
 
     return res.json({
@@ -126,60 +119,79 @@ app.get("/api/sql-test", async (req, res) => {
   }
 });
 
-// =========================
-// SMART SUMMARY
-// مؤقتًا fallback من JSON
-// مع التحقق أن SQL متصل
-// =========================
 app.get("/api/smart-summary", async (req, res) => {
-  let sqlConnected = false;
-
   try {
     const pool = await getSqlPool();
-    await pool.request().query("SELECT 1 AS ok");
-    sqlConnected = true;
-  } catch (sqlErr) {
-    console.warn("SMART SUMMARY SQL CHECK FAILED:", sqlErr.message);
-  }
 
-  try {
-    const summary = safeReadSummary();
+    const summaryResult = await pool.request().query(`
+      SELECT 
+        SUM(d.TOTAL) AS total_sales,
+        SUM(d.PROFIT) AS total_profit
+      FROM SAL_POINT_DTL d
+    `);
 
-    if (!summary.ok || !summary.data) {
-      return res.status(404).json({
-        ok: false,
-        source: "json-fallback",
-        sqlConnected,
-        error: summary.error || "Summary file not found"
-      });
-    }
+    const summary = summaryResult.recordset[0] || {};
 
-    const json = summary.data;
-    const dashboard = json.dashboard?.[0] || {};
+    const topResult = await pool.request().query(`
+      SELECT TOP 10
+        d.CLS_ID AS product_id,
+        c.NAME AS product_name_ar,
+        SUM(d.QTY) AS total_sold_qty,
+        SUM(d.TOTAL) AS total_sales_value,
+        SUM(d.PROFIT) AS estimated_profit
+      FROM SAL_POINT_DTL d
+      LEFT JOIN CLS c ON c.CLS_ID = d.CLS_ID
+      GROUP BY d.CLS_ID, c.NAME
+      ORDER BY SUM(d.QTY) DESC
+    `);
 
     return res.json({
       ok: true,
-      source: sqlConnected ? "json-fallback-with-sql-live" : "json-fallback",
-      sqlConnected,
-      totalSales: toNumber(dashboard.total_sales_value, 0),
-      estimatedProfit: toNumber(dashboard.estimated_total_profit, 0),
-      deadStock: toNumber(dashboard.dead_stock_count, 0),
-      lowStock: toNumber(dashboard.low_stock_risk_count, 0),
-      totalOrders: toNumber(dashboard.selling_products_count, 0),
-      topSelling: arrayOrEmpty(json.topSelling)
+      source: "sql-live",
+      totalSales: Number(summary.total_sales || 0),
+      estimatedProfit: Number(summary.total_profit || 0),
+      deadStock: 0,
+      lowStock: 0,
+      totalOrders: 0,
+      topSelling: topResult.recordset
     });
-  } catch (err) {
-    console.error("SMART SUMMARY ERROR:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Internal server error"
-    });
+  } catch (sqlErr) {
+    console.warn("SMART SUMMARY SQL ERROR:", sqlErr.message);
+
+    try {
+      const summary = safeReadSummary();
+
+      if (!summary.ok || !summary.data) {
+        return res.status(404).json({
+          ok: false,
+          source: "json-fallback",
+          error: summary.error || "Summary file not found"
+        });
+      }
+
+      const json = summary.data;
+      const dashboard = json.dashboard?.[0] || {};
+
+      return res.json({
+        ok: true,
+        source: "json-fallback",
+        totalSales: toNumber(dashboard.total_sales_value, 0),
+        estimatedProfit: toNumber(dashboard.estimated_total_profit, 0),
+        deadStock: toNumber(dashboard.dead_stock_count, 0),
+        lowStock: toNumber(dashboard.low_stock_risk_count, 0),
+        totalOrders: toNumber(dashboard.selling_products_count, 0),
+        topSelling: arrayOrEmpty(json.topSelling)
+      });
+    } catch (err) {
+      console.error("SMART SUMMARY FALLBACK ERROR:", err);
+      return res.status(500).json({
+        ok: false,
+        error: err.message
+      });
+    }
   }
 });
 
-// =========================
-// START
-// =========================
 app.listen(PORT, () => {
   console.log("===================================");
   console.log(`SMART PHARMACY API RUNNING ON ${PORT}`);
@@ -189,3 +201,4 @@ app.listen(PORT, () => {
   console.log("AUTH        : Windows Integrated");
   console.log("===================================");
 });
+'@ | Set-Content "D:\iPharmEGY_RUNTIME\pos\src\api\smart-pharmacy-api.js" -Encoding UTF8
