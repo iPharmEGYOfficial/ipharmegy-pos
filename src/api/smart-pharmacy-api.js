@@ -13,9 +13,6 @@ app.use(express.json());
 const EXPORTS_DIR = path.join(__dirname, "..", "..", "exports");
 const SUMMARY_FILE = path.join(EXPORTS_DIR, "smart-pharmacy-summary.json");
 
-// =========================
-// SQL CONFIG - LIVE DB
-// =========================
 const sqlConfig = {
   connectionString:
     "Driver={SQL Server Native Client 11.0};Server=DESKTOP-FOKGJSF\\SQLEXPRESS;Database=D:\\DB_SPOIN\\AMANSOFTS_20_10_2025.MDF;Trusted_Connection=Yes;",
@@ -59,6 +56,30 @@ function toNumber(value, fallback = 0) {
 
 function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function escapeSqlString(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function normalizeDateInput(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+function buildDateFilterSql(dateCol, from, to) {
+  const parts = [];
+
+  if (from) {
+    parts.push(`[${dateCol}] >= '${escapeSqlString(from)}'`);
+  }
+
+  if (to) {
+    parts.push(`[${dateCol}] < DATEADD(DAY, 1, '${escapeSqlString(to)}')`);
+  }
+
+  return parts.length ? `WHERE ${parts.join(" AND ")}` : "";
 }
 
 async function tableExists(pool, tableName) {
@@ -108,7 +129,7 @@ function firstExistingColumn(columns, candidates) {
   return null;
 }
 
-async function resolveTopSelling(pool, detailTable, classesTable) {
+async function resolveTopSelling(pool, detailTable, classesTable, headerTable, headerIdCol, headerDateCol, from, to) {
   if (!detailTable || !classesTable) {
     return {
       topSelling: [],
@@ -159,6 +180,13 @@ async function resolveTopSelling(pool, detailTable, classesTable) {
     "INC_REBH"
   ]);
 
+  const detailHeaderIdCol = firstExistingColumn(detailCols, [
+    "SP_S_ID",
+    "INV_ID",
+    "ID_H",
+    "HEADER_ID"
+  ]);
+
   const classIdCol = firstExistingColumn(classCols, [
     "CLS_ID",
     "CLASS_ID",
@@ -176,7 +204,14 @@ async function resolveTopSelling(pool, detailTable, classesTable) {
     "CLASS_NAME"
   ]);
 
-  if (!detailProductCol || !detailQtyCol || !detailSalesCol || !classIdCol || !classNameCol) {
+  if (
+    !detailProductCol ||
+    !detailQtyCol ||
+    !detailSalesCol ||
+    !detailHeaderIdCol ||
+    !classIdCol ||
+    !classNameCol
+  ) {
     return {
       topSelling: [],
       detected: {
@@ -186,11 +221,26 @@ async function resolveTopSelling(pool, detailTable, classesTable) {
         detailQtyCol,
         detailSalesCol,
         detailProfitCol,
+        detailHeaderIdCol,
         classIdCol,
         classNameCol
       }
     };
   }
+
+  const conditions = [];
+
+  if (from) {
+    conditions.push(`h.[${headerDateCol}] >= '${escapeSqlString(from)}'`);
+  }
+
+  if (to) {
+    conditions.push(`h.[${headerDateCol}] < DATEADD(DAY, 1, '${escapeSqlString(to)}')`);
+  }
+
+  conditions.push(`d.[${detailProductCol}] IS NOT NULL`);
+
+  const whereSql = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const topSql = `
     SELECT TOP 10
@@ -200,9 +250,11 @@ async function resolveTopSelling(pool, detailTable, classesTable) {
       SUM(ISNULL(d.[${detailSalesCol}], 0)) AS total_sales_value,
       SUM(ISNULL(d.[${detailProfitCol || detailSalesCol}], 0)) AS estimated_profit
     FROM [${detailTable}] d
+    LEFT JOIN [${headerTable}] h
+      ON h.[${headerIdCol}] = d.[${detailHeaderIdCol}]
     LEFT JOIN [${classesTable}] c
       ON c.[${classIdCol}] = d.[${detailProductCol}]
-    WHERE d.[${detailProductCol}] IS NOT NULL
+    ${whereSql}
     GROUP BY d.[${detailProductCol}], c.[${classNameCol}]
     ORDER BY SUM(ISNULL(d.[${detailQtyCol}], 0)) DESC
   `;
@@ -218,15 +270,13 @@ async function resolveTopSelling(pool, detailTable, classesTable) {
       detailQtyCol,
       detailSalesCol,
       detailProfitCol,
+      detailHeaderIdCol,
       classIdCol,
       classNameCol
     }
   };
 }
 
-// =========================
-// BASIC TEST
-// =========================
 app.get("/api/ping", (req, res) => {
   res.json({
     ok: true,
@@ -235,9 +285,6 @@ app.get("/api/ping", (req, res) => {
   });
 });
 
-// =========================
-// HEALTH
-// =========================
 app.get("/api/health", async (req, res) => {
   const summary = safeReadSummary();
 
@@ -261,9 +308,6 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
-// =========================
-// SQL TEST - LIST TABLES
-// =========================
 app.get("/api/sql-test", async (req, res) => {
   try {
     const pool = await getSqlPool();
@@ -293,11 +337,6 @@ app.get("/api/sql-test", async (req, res) => {
   }
 });
 
-// =========================
-// SQL COLUMNS INSPECTOR
-// مثال:
-// /api/sql-columns/SAL_POINT_INV
-// =========================
 app.get("/api/sql-columns/:table", async (req, res) => {
   try {
     const pool = await getSqlPool();
@@ -319,18 +358,93 @@ app.get("/api/sql-columns/:table", async (req, res) => {
   }
 });
 
-// =========================
-// SMART SUMMARY
-// 1) SQL LIVE
-// 2) JSON FALLBACK
-// =========================
+app.get("/api/daily-sales", async (req, res) => {
+  try {
+    const pool = await getSqlPool();
+
+    const headerTable = await firstExistingTable(pool, [
+      "SAL_POINT_INV",
+      "SAL_POINT",
+      "SALE_INV",
+      "BILLS"
+    ]);
+
+    if (!headerTable) {
+      throw new Error("Could not detect sales header table.");
+    }
+
+    const headerCols = await getColumns(pool, headerTable);
+
+    const headerDateCol = firstExistingColumn(headerCols, [
+      "SP_S_DATE",
+      "INV_DATE",
+      "DATE",
+      "DOC_DATE"
+    ]);
+
+    const headerSalesCol = firstExistingColumn(headerCols, [
+      "SP_S_TOT_FORIGNVALUE",
+      "TOTAL",
+      "TOTAL_VALUE",
+      "NET_TOTAL"
+    ]);
+
+    const headerProfitCol = firstExistingColumn(headerCols, [
+      "SP_S_REBH",
+      "PROFIT",
+      "TOTAL_PROFIT"
+    ]);
+
+    if (!headerDateCol || !headerSalesCol) {
+      throw new Error(
+        `Daily sales columns not detected correctly. headerDateCol=${headerDateCol}, headerSalesCol=${headerSalesCol}`
+      );
+    }
+
+    const from = normalizeDateInput(req.query.from);
+    const to = normalizeDateInput(req.query.to);
+    const dateWhereSql = buildDateFilterSql(headerDateCol, from, to);
+
+    const dailySalesSql = `
+      SELECT
+        CONVERT(date, [${headerDateCol}]) AS sale_date,
+        COUNT(*) AS orders_count,
+        SUM(ISNULL([${headerSalesCol}], 0)) AS total_sales,
+        SUM(ISNULL([${headerProfitCol || headerSalesCol}], 0)) AS total_profit
+      FROM [${headerTable}]
+      ${dateWhereSql}
+      GROUP BY CONVERT(date, [${headerDateCol}])
+      ORDER BY CONVERT(date, [${headerDateCol}]) ASC
+    `;
+
+    const result = await pool.request().query(dailySalesSql);
+
+    return res.json({
+      ok: true,
+      source: "sql-live",
+      table: headerTable,
+      dateColumn: headerDateCol,
+      salesColumn: headerSalesCol,
+      profitColumn: headerProfitCol || null,
+      filters: {
+        from,
+        to
+      },
+      data: result.recordset || []
+    });
+  } catch (err) {
+    console.error("DAILY SALES ERROR:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+
 app.get("/api/smart-summary", async (req, res) => {
   try {
     const pool = await getSqlPool();
 
-    // ---------
-    // Resolve actual tables
-    // ---------
     const headerTable = await firstExistingTable(pool, [
       "SAL_POINT_INV",
       "SAL_POINT",
@@ -359,9 +473,6 @@ app.get("/api/smart-summary", async (req, res) => {
 
     const headerCols = await getColumns(pool, headerTable);
 
-    // ---------
-    // Detect header columns
-    // ---------
     const headerIdCol = firstExistingColumn(headerCols, [
       "SP_S_ID",
       "INV_ID",
@@ -394,9 +505,10 @@ app.get("/api/smart-summary", async (req, res) => {
       );
     }
 
-    // ---------
-    // Summary from header
-    // ---------
+    const from = normalizeDateInput(req.query.from);
+    const to = normalizeDateInput(req.query.to);
+    const dateWhereSql = buildDateFilterSql(headerDateCol, from, to);
+
     const summarySql = `
       SELECT
         COUNT(*) AS total_orders,
@@ -404,35 +516,48 @@ app.get("/api/smart-summary", async (req, res) => {
         SUM(ISNULL([${headerProfitCol || headerSalesCol}], 0)) AS total_profit,
         MAX([${headerDateCol}]) AS last_sale_date
       FROM [${headerTable}]
+      ${dateWhereSql}
     `;
 
     const summaryResult = await pool.request().query(summarySql);
     const summary = summaryResult.recordset[0] || {};
 
-    // ---------
-    // Top selling
-    // ---------
     let topSelling = [];
     let topSellingDetected = null;
     let detailTableUsed = null;
 
     if (primaryDetailTable && classesTable) {
-      const primaryTop = await resolveTopSelling(pool, primaryDetailTable, classesTable);
+      const primaryTop = await resolveTopSelling(
+        pool,
+        primaryDetailTable,
+        classesTable,
+        headerTable,
+        headerIdCol,
+        headerDateCol,
+        from,
+        to
+      );
       topSelling = primaryTop.topSelling;
       topSellingDetected = primaryTop.detected;
       detailTableUsed = primaryDetailTable;
     }
 
     if ((!topSelling || topSelling.length === 0) && altDetailTable && classesTable) {
-      const altTop = await resolveTopSelling(pool, altDetailTable, classesTable);
+      const altTop = await resolveTopSelling(
+        pool,
+        altDetailTable,
+        classesTable,
+        headerTable,
+        headerIdCol,
+        headerDateCol,
+        from,
+        to
+      );
       topSelling = altTop.topSelling;
       topSellingDetected = altTop.detected;
       detailTableUsed = altDetailTable;
     }
 
-    // ---------
-    // Inventory signals (best effort)
-    // ---------
     let deadStock = 0;
     let lowStock = 0;
 
@@ -503,6 +628,10 @@ app.get("/api/smart-summary", async (req, res) => {
         headerSalesCol,
         headerProfitCol,
         topSellingDetected
+      },
+      filters: {
+        from,
+        to
       },
       totalSales: toNumber(summary.total_sales, 0),
       estimatedProfit: toNumber(summary.total_profit, 0),
