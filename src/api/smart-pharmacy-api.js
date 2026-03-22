@@ -362,7 +362,7 @@ app.get("/api/smart-summary", async (req, res) => {
         const topSql = `
   SELECT TOP 10
     d.CLS_ID AS product_id,
-    c.NAME AS product_name_ar,
+    c.CLS_ARNAME AS product_name_ar,
     SUM(ISNULL(d.SP_SD_QTY, 0)) AS total_sold_qty,
     SUM(ISNULL(d.SP_SD_TOT_FORIGNVALUE, 0)) AS total_sales_value,
     SUM(ISNULL(d.SP_SD_INC_REBH, 0)) AS estimated_profit
@@ -371,7 +371,7 @@ app.get("/api/smart-summary", async (req, res) => {
     ON h.SP_S_ID = d.SP_S_ID
   LEFT JOIN CLASSES c
     ON c.CLS_ID = d.CLS_ID
-  GROUP BY d.CLS_ID, c.NAME
+  GROUP BY d.CLS_ID, c.CLS_ARNAME
   ORDER BY SUM(ISNULL(d.SP_SD_QTY, 0)) DESC
 `;
 
