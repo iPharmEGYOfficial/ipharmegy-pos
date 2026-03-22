@@ -1,5 +1,4 @@
-﻿@'
-const express = require("express");
+﻿const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -201,4 +200,3 @@ app.listen(PORT, () => {
   console.log("AUTH        : Windows Integrated");
   console.log("===================================");
 });
-'@ | Set-Content "D:\iPharmEGY_RUNTIME\pos\src\api\smart-pharmacy-api.js" -Encoding UTF8
