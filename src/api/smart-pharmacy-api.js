@@ -129,7 +129,16 @@ function firstExistingColumn(columns, candidates) {
   return null;
 }
 
-async function resolveTopSelling(pool, detailTable, classesTable, headerTable, headerIdCol, headerDateCol, from, to) {
+async function resolveTopSelling(
+  pool,
+  detailTable,
+  classesTable,
+  headerTable,
+  headerIdCol,
+  headerDateCol,
+  from,
+  to
+) {
   if (!detailTable || !classesTable) {
     return {
       topSelling: [],
@@ -180,6 +189,14 @@ async function resolveTopSelling(pool, detailTable, classesTable, headerTable, h
     "INC_REBH"
   ]);
 
+  const detailCostCol = firstExistingColumn(detailCols, [
+    "SP_SD_PRICE_COST",
+    "PRICE_COST",
+    "COST_PRICE",
+    "ITEM_COST",
+    "COST"
+  ]);
+
   const detailHeaderIdCol = firstExistingColumn(detailCols, [
     "SP_S_ID",
     "INV_ID",
@@ -208,6 +225,7 @@ async function resolveTopSelling(pool, detailTable, classesTable, headerTable, h
     !detailProductCol ||
     !detailQtyCol ||
     !detailSalesCol ||
+    !detailCostCol ||
     !detailHeaderIdCol ||
     !classIdCol ||
     !classNameCol
@@ -221,6 +239,7 @@ async function resolveTopSelling(pool, detailTable, classesTable, headerTable, h
         detailQtyCol,
         detailSalesCol,
         detailProfitCol,
+        detailCostCol,
         detailHeaderIdCol,
         classIdCol,
         classNameCol
@@ -248,7 +267,10 @@ async function resolveTopSelling(pool, detailTable, classesTable, headerTable, h
       c.[${classNameCol}] AS product_name_ar,
       SUM(ISNULL(d.[${detailQtyCol}], 0)) AS total_sold_qty,
       SUM(ISNULL(d.[${detailSalesCol}], 0)) AS total_sales_value,
-      SUM(ISNULL(d.[${detailProfitCol || detailSalesCol}], 0)) AS estimated_profit
+      SUM(
+        ISNULL(d.[${detailSalesCol}], 0) -
+        (ISNULL(d.[${detailCostCol}], 0) * ISNULL(d.[${detailQtyCol}], 0))
+      ) AS estimated_profit
     FROM [${detailTable}] d
     LEFT JOIN [${headerTable}] h
       ON h.[${headerIdCol}] = d.[${detailHeaderIdCol}]
@@ -270,6 +292,7 @@ async function resolveTopSelling(pool, detailTable, classesTable, headerTable, h
       detailQtyCol,
       detailSalesCol,
       detailProfitCol,
+      detailCostCol,
       detailHeaderIdCol,
       classIdCol,
       classNameCol
