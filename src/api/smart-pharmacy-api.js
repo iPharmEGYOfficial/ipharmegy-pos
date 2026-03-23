@@ -644,40 +644,13 @@ app.get("/api/smart-summary", async (req, res) => {
   } catch (sqlErr) {
     console.error("SMART SUMMARY SQL ERROR FULL:", sqlErr);
 
-    try {
-      const summary = safeReadSummary();
-
-      if (!summary.ok || !summary.data) {
-        return res.status(404).json({
-          ok: false,
-          source: "json-fallback",
-          sqlConnected: false,
-          error: summary.error || "Summary file not found"
-        });
-      }
-
-      const json = summary.data;
-      const dashboard = json.dashboard?.[0] || {};
-
-      return res.json({
-        ok: true,
-        source: "json-fallback",
-        sqlConnected: false,
-        totalSales: toNumber(dashboard.total_sales_value, 0),
-        estimatedProfit: toNumber(dashboard.estimated_total_profit, 0),
-        deadStock: toNumber(dashboard.dead_stock_count, 0),
-        lowStock: toNumber(dashboard.low_stock_risk_count, 0),
-        totalOrders: toNumber(dashboard.selling_products_count, 0),
-        lastSaleDate: json.generatedAt || null,
-        topSelling: arrayOrEmpty(json.topSelling)
-      });
-    } catch (err) {
-      console.error("SMART SUMMARY FALLBACK ERROR:", err);
-      return res.status(500).json({
-        ok: false,
-        error: err.message
-      });
-    }
+    return res.status(500).json({
+      ok: false,
+      source: "sql-live",
+      sqlConnected: true,
+      error: sqlErr.message,
+      stack: sqlErr.stack
+    });
   }
 });
 
