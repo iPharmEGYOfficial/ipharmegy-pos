@@ -1,9 +1,8 @@
 {
-  "name": "ipharmegy-pos",
+  "name": "ipharmegy-pos-api",
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@ipharmegy/core": "file:../ipharmegy-core",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "msnodesqlv8": "^5.1.5",

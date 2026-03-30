@@ -1,17 +1,12 @@
 ﻿const express = require("express");
-const fs = require("fs");
-const path = require("path");
 const cors = require("cors");
 const sql = require("mssql/msnodesqlv8");
 
 const app = express();
-const PORT = 4015;
+const PORT = 4010;
 
 app.use(cors());
 app.use(express.json());
-
-const EXPORTS_DIR = path.join(__dirname, "..", "..", "exports");
-const SUMMARY_FILE = path.join(EXPORTS_DIR, "smart-pharmacy-summary.json");
 
 const sqlConfig = {
   connectionString:
@@ -19,43 +14,13 @@ const sqlConfig = {
   driver: "msnodesqlv8"
 };
 
-async function getSqlPool() {
+async function getPool() {
   return sql.connect(sqlConfig);
-}
-
-function safeReadSummary() {
-  try {
-    if (!fs.existsSync(SUMMARY_FILE)) {
-      return {
-        ok: false,
-        error: "Summary file not found",
-        data: null
-      };
-    }
-
-    const raw = fs.readFileSync(SUMMARY_FILE, "utf8");
-    const json = JSON.parse(raw);
-
-    return {
-      ok: true,
-      data: json
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err.message,
-      data: null
-    };
-  }
 }
 
 function toNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function arrayOrEmpty(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function escapeSqlString(value) {
@@ -68,621 +33,155 @@ function normalizeDateInput(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
-function buildDateFilterSql(dateCol, from, to) {
+function buildDateFilterSql(dateCol, from, to, alias = "") {
+  const p = alias ? `${alias}.` : "";
   const parts = [];
 
   if (from) {
-    parts.push(`[${dateCol}] >= '${escapeSqlString(from)}'`);
+    parts.push(`${p}[${dateCol}] >= '${escapeSqlString(from)}'`);
   }
 
   if (to) {
-    parts.push(`[${dateCol}] < DATEADD(DAY, 1, '${escapeSqlString(to)}')`);
+    parts.push(`${p}[${dateCol}] < DATEADD(DAY, 1, '${escapeSqlString(to)}')`);
   }
 
   return parts.length ? `WHERE ${parts.join(" AND ")}` : "";
 }
 
-async function tableExists(pool, tableName) {
-  const result = await pool
-    .request()
-    .input("tableName", sql.NVarChar, tableName)
-    .query(`
-      SELECT COUNT(*) AS cnt
-      FROM INFORMATION_SCHEMA.TABLES
-      WHERE TABLE_TYPE = 'BASE TABLE'
-        AND TABLE_NAME = @tableName
-    `);
-
-  return (result.recordset?.[0]?.cnt || 0) > 0;
-}
-
-async function firstExistingTable(pool, candidates) {
-  for (const tableName of candidates) {
-    if (await tableExists(pool, tableName)) {
-      return tableName;
-    }
-  }
-  return null;
-}
-
-async function getColumns(pool, tableName) {
-  const result = await pool
-    .request()
-    .input("tableName", sql.NVarChar, tableName)
-    .query(`
-      SELECT COLUMN_NAME
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = @tableName
-      ORDER BY ORDINAL_POSITION
-    `);
-
-  return result.recordset.map((r) => r.COLUMN_NAME);
-}
-
-function firstExistingColumn(columns, candidates) {
-  const normalized = new Set(columns.map((c) => c.toUpperCase()));
-  for (const candidate of candidates) {
-    if (normalized.has(candidate.toUpperCase())) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-async function resolveTopSelling(
-  pool,
-  detailTable,
-  classesTable,
-  headerTable,
-  headerIdCol,
-  headerDateCol,
-  from,
-  to
-) {
-  if (!detailTable || !classesTable) {
-    return {
-      topSelling: [],
-      detected: {
-        detailTable,
-        classesTable
-      }
-    };
-  }
-
-  const detailCols = await getColumns(pool, detailTable);
-  const classCols = await getColumns(pool, classesTable);
-
-  const detailProductCol = firstExistingColumn(detailCols, [
-    "CLS_ID",
-    "CLASS_ID",
-    "ITEM_ID",
-    "PRODUCT_ID"
-  ]);
-
-  const detailQtyCol = firstExistingColumn(detailCols, [
-    "SP_SD_QTY",
-    "SP_SD_QNT",
-    "SP_SD_QLT",
-    "QTY",
-    "SP_QTY",
-    "QTY1",
-    "ITEM_QTY",
-    "QUANTITY"
-  ]);
-
-  const detailSalesCol = firstExistingColumn(detailCols, [
-    "SP_SD_TOT_FORIGNVALUE",
-    "TOTAL",
-    "SP_TOTAL",
-    "TOTAL_VALUE",
-    "NET_VALUE",
-    "FORIGNVALUE",
-    "TOT_FORIGNVALUE"
-  ]);
-
-  const detailProfitCol = firstExistingColumn(detailCols, [
-    "SP_SD_INC_REBH",
-    "SP_SD_REBH",
-    "PROFIT",
-    "SP_PROFIT",
-    "REBH",
-    "INC_REBH"
-  ]);
-
-  const detailCostCol = firstExistingColumn(detailCols, [
-    "SP_SD_PRICE_COST",
-    "PRICE_COST",
-    "COST_PRICE",
-    "ITEM_COST",
-    "COST"
-  ]);
-
-  const detailHeaderIdCol = firstExistingColumn(detailCols, [
-    "SP_S_ID",
-    "INV_ID",
-    "ID_H",
-    "HEADER_ID"
-  ]);
-
-  const classIdCol = firstExistingColumn(classCols, [
-    "CLS_ID",
-    "CLASS_ID",
-    "ITEM_ID",
-    "PRODUCT_ID"
-  ]);
-
-  const classNameCol = firstExistingColumn(classCols, [
-    "CLS_ARNAME",
-    "CLS_ENNAME",
-    "NAME",
-    "CLS_DESC",
-    "ITEMNAME",
-    "ITEM_NAME",
-    "CLASS_NAME"
-  ]);
-
-  if (
-    !detailProductCol ||
-    !detailQtyCol ||
-    !detailSalesCol ||
-    !detailCostCol ||
-    !detailHeaderIdCol ||
-    !classIdCol ||
-    !classNameCol
-  ) {
-    return {
-      topSelling: [],
-      detected: {
-        detailTable,
-        classesTable,
-        detailProductCol,
-        detailQtyCol,
-        detailSalesCol,
-        detailProfitCol,
-        detailCostCol,
-        detailHeaderIdCol,
-        classIdCol,
-        classNameCol
-      }
-    };
-  }
-
-  const conditions = [];
-
-  if (from) {
-    conditions.push(`h.[${headerDateCol}] >= '${escapeSqlString(from)}'`);
-  }
-
-  if (to) {
-    conditions.push(`h.[${headerDateCol}] < DATEADD(DAY, 1, '${escapeSqlString(to)}')`);
-  }
-
-  conditions.push(`d.[${detailProductCol}] IS NOT NULL`);
-
-  const whereSql = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
-  const topSql = `
-    SELECT TOP 10
-      d.[${detailProductCol}] AS product_id,
-      c.[${classNameCol}] AS product_name_ar,
-      SUM(ISNULL(d.[${detailQtyCol}], 0)) AS total_sold_qty,
-      SUM(ISNULL(d.[${detailSalesCol}], 0)) AS total_sales_value,
-      SUM(
-        ISNULL(d.[${detailSalesCol}], 0) -
-        (ISNULL(d.[${detailCostCol}], 0) * ISNULL(d.[${detailQtyCol}], 0))
-      ) AS estimated_profit
-    FROM [${detailTable}] d
-    LEFT JOIN [${headerTable}] h
-      ON h.[${headerIdCol}] = d.[${detailHeaderIdCol}]
-    LEFT JOIN [${classesTable}] c
-      ON c.[${classIdCol}] = d.[${detailProductCol}]
-    ${whereSql}
-    GROUP BY d.[${detailProductCol}], c.[${classNameCol}]
-    ORDER BY SUM(ISNULL(d.[${detailQtyCol}], 0)) DESC
-  `;
-
-  const topResult = await pool.request().query(topSql);
-
-  return {
-    topSelling: topResult.recordset || [],
-    detected: {
-      detailTable,
-      classesTable,
-      detailProductCol,
-      detailQtyCol,
-      detailSalesCol,
-      detailProfitCol,
-      detailCostCol,
-      detailHeaderIdCol,
-      classIdCol,
-      classNameCol
-    }
-  };
-}
-
 app.get("/api/ping", (req, res) => {
   res.json({
     ok: true,
-    message: "PING_OK",
+    message: "POS_API_OK",
     port: PORT
   });
 });
 
-app.get("/api/health", async (req, res) => {
-  const summary = safeReadSummary();
-
-  let sqlLive = false;
-  let sqlError = null;
-
+app.get("/api/pos-summary", async (req, res) => {
   try {
-    const pool = await getSqlPool();
-    await pool.request().query("SELECT 1 AS ok");
-    sqlLive = true;
-  } catch (err) {
-    sqlError = err.message;
-  }
+    const pool = await getPool();
 
-  res.json({
-    ok: true,
-    status: "online",
-    jsonSummaryAvailable: summary.ok,
-    sqlLive,
-    sqlError
-  });
-});
+    const from = normalizeDateInput(req.query.from);
+    const to = normalizeDateInput(req.query.to);
 
-app.get("/api/sql-test", async (req, res) => {
-  try {
-    const pool = await getSqlPool();
+    const whereSql = buildDateFilterSql("SP_S_DATE", from, to);
 
     const result = await pool.request().query(`
-      SELECT TOP 200
-        TABLE_SCHEMA,
-        TABLE_NAME
-      FROM INFORMATION_SCHEMA.TABLES
-      WHERE TABLE_TYPE = 'BASE TABLE'
-      ORDER BY TABLE_SCHEMA, TABLE_NAME
+      SELECT
+        COUNT(*) AS total_orders,
+        SUM(ISNULL(SP_S_TOT_FORIGNVALUE, 0)) AS total_sales,
+        SUM(ISNULL(SP_S_REBH, 0)) AS estimated_profit,
+        MAX(SP_S_DATE) AS last_sale_date
+      FROM SAL_POINT_INV
+      ${whereSql}
     `);
 
-    return res.json({
+    const row = result.recordset[0] || {};
+
+    res.json({
       ok: true,
       source: "sql-live",
+      filters: { from, to },
+      data: {
+        totalOrders: toNumber(row.total_orders),
+        totalSales: toNumber(row.total_sales),
+        estimatedProfit: toNumber(row.estimated_profit),
+        lastSaleDate: row.last_sale_date || null
+      }
+    });
+  } catch (err) {
+    console.error("POS SUMMARY ERROR:", err);
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
+
+app.get("/api/pos-daily-sales", async (req, res) => {
+  try {
+    const pool = await getPool();
+
+    const from = normalizeDateInput(req.query.from);
+    const to = normalizeDateInput(req.query.to);
+
+    const whereSql = buildDateFilterSql("SP_S_DATE", from, to);
+
+    const result = await pool.request().query(`
+      SELECT
+        CONVERT(date, SP_S_DATE) AS sale_date,
+        COUNT(*) AS orders_count,
+        SUM(ISNULL(SP_S_TOT_FORIGNVALUE, 0)) AS total_sales,
+        SUM(ISNULL(SP_S_REBH, 0)) AS total_profit
+      FROM SAL_POINT_INV
+      ${whereSql}
+      GROUP BY CONVERT(date, SP_S_DATE)
+      ORDER BY CONVERT(date, SP_S_DATE) ASC
+    `);
+
+    res.json({
+      ok: true,
+      source: "sql-live",
+      filters: { from, to },
       count: result.recordset.length,
       data: result.recordset
     });
   } catch (err) {
-    console.error("SQL TEST ERROR:", err);
-    return res.status(500).json({
-      ok: false,
-      source: "sql-live",
-      error: err.message
-    });
-  }
-});
-
-app.get("/api/sql-columns/:table", async (req, res) => {
-  try {
-    const pool = await getSqlPool();
-    const tableName = req.params.table;
-    const columns = await getColumns(pool, tableName);
-
-    return res.json({
-      ok: true,
-      table: tableName,
-      count: columns.length,
-      columns
-    });
-  } catch (err) {
-    console.error("SQL COLUMNS ERROR:", err);
-    return res.status(500).json({
+    console.error("POS DAILY SALES ERROR:", err);
+    res.status(500).json({
       ok: false,
       error: err.message
     });
   }
 });
 
-app.get("/api/daily-sales", async (req, res) => {
+app.get("/api/pos-top-selling", async (req, res) => {
   try {
-    const pool = await getSqlPool();
-
-    const headerTable = await firstExistingTable(pool, [
-      "SAL_POINT_INV",
-      "SAL_POINT",
-      "SALE_INV",
-      "BILLS"
-    ]);
-
-    if (!headerTable) {
-      throw new Error("Could not detect sales header table.");
-    }
-
-    const headerCols = await getColumns(pool, headerTable);
-
-    const headerDateCol = firstExistingColumn(headerCols, [
-      "SP_S_DATE",
-      "INV_DATE",
-      "DATE",
-      "DOC_DATE"
-    ]);
-
-    const headerSalesCol = firstExistingColumn(headerCols, [
-      "SP_S_TOT_FORIGNVALUE",
-      "TOTAL",
-      "TOTAL_VALUE",
-      "NET_TOTAL"
-    ]);
-
-    const headerProfitCol = firstExistingColumn(headerCols, [
-      "SP_S_REBH",
-      "PROFIT",
-      "TOTAL_PROFIT"
-    ]);
-
-    if (!headerDateCol || !headerSalesCol) {
-      throw new Error(
-        `Daily sales columns not detected correctly. headerDateCol=${headerDateCol}, headerSalesCol=${headerSalesCol}`
-      );
-    }
+    const pool = await getPool();
 
     const from = normalizeDateInput(req.query.from);
     const to = normalizeDateInput(req.query.to);
-    const dateWhereSql = buildDateFilterSql(headerDateCol, from, to);
+    const top = Math.max(1, Math.min(parseInt(req.query.top || "10", 10), 100));
 
-    const dailySalesSql = `
-      SELECT
-        CONVERT(date, [${headerDateCol}]) AS sale_date,
-        COUNT(*) AS orders_count,
-        SUM(ISNULL([${headerSalesCol}], 0)) AS total_sales,
-        SUM(ISNULL([${headerProfitCol || headerSalesCol}], 0)) AS total_profit
-      FROM [${headerTable}]
-      ${dateWhereSql}
-      GROUP BY CONVERT(date, [${headerDateCol}])
-      ORDER BY CONVERT(date, [${headerDateCol}]) ASC
-    `;
+    const whereSql = buildDateFilterSql("SP_S_DATE", from, to, "h");
 
-    const result = await pool.request().query(dailySalesSql);
+    const result = await pool.request().query(`
+      SELECT TOP (${top})
+        d.CLS_ID AS item_id,
+        c.CLS_ARNAME AS item_name_ar,
+        SUM(ISNULL(d.SP_SD_QLT, 0)) AS qty_sold,
+        SUM(ISNULL(d.SP_SD_TOT_FORIGNVALUE, 0)) AS sales_value,
+        SUM(
+          ISNULL(d.SP_SD_TOT_FORIGNVALUE, 0) -
+          (ISNULL(d.SP_SD_PRICE_COST, 0) * ISNULL(d.SP_SD_QLT, 0))
+        ) AS calculated_profit
+      FROM SAL_POINT_INV_DET d
+      INNER JOIN SAL_POINT_INV h
+        ON h.SP_S_ID = d.SP_S_ID
+      LEFT JOIN CLASSES c
+        ON c.CLS_ID = d.CLS_ID
+      ${whereSql}
+      GROUP BY d.CLS_ID, c.CLS_ARNAME
+      ORDER BY SUM(ISNULL(d.SP_SD_QLT, 0)) DESC, d.CLS_ID ASC
+    `);
 
-    return res.json({
+    res.json({
       ok: true,
       source: "sql-live",
-      table: headerTable,
-      dateColumn: headerDateCol,
-      salesColumn: headerSalesCol,
-      profitColumn: headerProfitCol || null,
-      filters: {
-        from,
-        to
-      },
-      data: result.recordset || []
+      filters: { from, to, top },
+      count: result.recordset.length,
+      data: result.recordset
     });
   } catch (err) {
-    console.error("DAILY SALES ERROR:", err);
-    return res.status(500).json({
+    console.error("POS TOP SELLING ERROR:", err);
+    res.status(500).json({
       ok: false,
       error: err.message
-    });
-  }
-});
-
-app.get("/api/smart-summary", async (req, res) => {
-  try {
-    const pool = await getSqlPool();
-
-    const headerTable = await firstExistingTable(pool, [
-      "SAL_POINT_INV",
-      "SAL_POINT",
-      "SALE_INV",
-      "BILLS"
-    ]);
-
-    const primaryDetailTable = await firstExistingTable(pool, [
-      "SAL_POINT_INV_DET",
-      "SAL_POINT_DTL"
-    ]);
-
-    const altDetailTable = await firstExistingTable(pool, [
-      "SAL_POINT_DETAIL_CLASS"
-    ]);
-
-    const classesTable = await firstExistingTable(pool, [
-      "CLASSES",
-      "CLS",
-      "ITEMS"
-    ]);
-
-    if (!headerTable) {
-      throw new Error("Could not detect sales header table.");
-    }
-
-    const headerCols = await getColumns(pool, headerTable);
-
-    const headerIdCol = firstExistingColumn(headerCols, [
-      "SP_S_ID",
-      "INV_ID",
-      "ID"
-    ]);
-
-    const headerDateCol = firstExistingColumn(headerCols, [
-      "SP_S_DATE",
-      "INV_DATE",
-      "DATE",
-      "DOC_DATE"
-    ]);
-
-    const headerSalesCol = firstExistingColumn(headerCols, [
-      "SP_S_TOT_FORIGNVALUE",
-      "TOTAL",
-      "TOTAL_VALUE",
-      "NET_TOTAL"
-    ]);
-
-    const headerProfitCol = firstExistingColumn(headerCols, [
-      "SP_S_REBH",
-      "PROFIT",
-      "TOTAL_PROFIT"
-    ]);
-
-    if (!headerIdCol || !headerDateCol || !headerSalesCol) {
-      throw new Error(
-        `Header columns not detected correctly. headerIdCol=${headerIdCol}, headerDateCol=${headerDateCol}, headerSalesCol=${headerSalesCol}`
-      );
-    }
-
-    const from = normalizeDateInput(req.query.from);
-    const to = normalizeDateInput(req.query.to);
-    const dateWhereSql = buildDateFilterSql(headerDateCol, from, to);
-
-    const summarySql = `
-      SELECT
-        COUNT(*) AS total_orders,
-        SUM(ISNULL([${headerSalesCol}], 0)) AS total_sales,
-        SUM(ISNULL([${headerProfitCol || headerSalesCol}], 0)) AS total_profit,
-        MAX([${headerDateCol}]) AS last_sale_date
-      FROM [${headerTable}]
-      ${dateWhereSql}
-    `;
-
-    const summaryResult = await pool.request().query(summarySql);
-    const summary = summaryResult.recordset[0] || {};
-
-    let topSelling = [];
-    let topSellingDetected = null;
-    let detailTableUsed = null;
-
-    if (primaryDetailTable && classesTable) {
-      const primaryTop = await resolveTopSelling(
-        pool,
-        primaryDetailTable,
-        classesTable,
-        headerTable,
-        headerIdCol,
-        headerDateCol,
-        from,
-        to
-      );
-      topSelling = primaryTop.topSelling;
-      topSellingDetected = primaryTop.detected;
-      detailTableUsed = primaryDetailTable;
-    }
-
-    if ((!topSelling || topSelling.length === 0) && altDetailTable && classesTable) {
-      const altTop = await resolveTopSelling(
-        pool,
-        altDetailTable,
-        classesTable,
-        headerTable,
-        headerIdCol,
-        headerDateCol,
-        from,
-        to
-      );
-      topSelling = altTop.topSelling;
-      topSellingDetected = altTop.detected;
-      detailTableUsed = altDetailTable;
-    }
-
-    let deadStock = 0;
-    let lowStock = 0;
-
-    const inventoryTable = await firstExistingTable(pool, [
-      "INVENTORY",
-      "INVENTORY_ITEMS",
-      "STOCK"
-    ]);
-
-    if (inventoryTable) {
-      const invCols = await getColumns(pool, inventoryTable);
-
-      const invQtyCol = firstExistingColumn(invCols, [
-        "QTY",
-        "BALANCE",
-        "CURRENT_QTY",
-        "ITEM_QTY",
-        "QUANTITY"
-      ]);
-
-      const minQtyCol = firstExistingColumn(invCols, [
-        "MIN_QTY",
-        "MINIMUM_QTY",
-        "REORDER_QTY",
-        "CLS_MIN_LIMIT",
-        "CLS_MIN_LIMIT_ST"
-      ]);
-
-      if (invQtyCol) {
-        const deadSql = `
-          SELECT COUNT(*) AS cnt
-          FROM [${inventoryTable}]
-          WHERE ISNULL([${invQtyCol}], 0) > 0
-        `;
-
-        const deadResult = await pool.request().query(deadSql);
-        deadStock = toNumber(deadResult.recordset?.[0]?.cnt, 0);
-      }
-
-      if (invQtyCol && minQtyCol) {
-        const lowSql = `
-          SELECT COUNT(*) AS cnt
-          FROM [${inventoryTable}]
-          WHERE ISNULL([${invQtyCol}], 0) > 0
-            AND ISNULL([${invQtyCol}], 0) <= ISNULL([${minQtyCol}], 0)
-        `;
-
-        const lowResult = await pool.request().query(lowSql);
-        lowStock = toNumber(lowResult.recordset?.[0]?.cnt, 0);
-      }
-    }
-
-    return res.json({
-      ok: true,
-      source: "sql-live",
-      sqlConnected: true,
-      tables: {
-        headerTable,
-        detailTable: detailTableUsed,
-        primaryDetailTable,
-        altDetailTable,
-        classesTable,
-        inventoryTable
-      },
-      detected: {
-        headerIdCol,
-        headerDateCol,
-        headerSalesCol,
-        headerProfitCol,
-        topSellingDetected
-      },
-      filters: {
-        from,
-        to
-      },
-      totalSales: toNumber(summary.total_sales, 0),
-      estimatedProfit: toNumber(summary.total_profit, 0),
-      deadStock,
-      lowStock,
-      totalOrders: toNumber(summary.total_orders, 0),
-      lastSaleDate: summary.last_sale_date || null,
-      topSelling
-    });
-  } catch (sqlErr) {
-    console.error("SMART SUMMARY SQL ERROR FULL:", sqlErr);
-
-    return res.status(500).json({
-      ok: false,
-      source: "sql-live",
-      sqlConnected: true,
-      error: sqlErr.message,
-      stack: sqlErr.stack
     });
   }
 });
 
 app.listen(PORT, () => {
-  console.log("===================================");
   console.log(`SMART PHARMACY API RUNNING ON ${PORT}`);
-  console.log(`SUMMARY_FILE: ${SUMMARY_FILE}`);
   console.log("SQL SERVER  : DESKTOP-FOKGJSF\\SQLEXPRESS");
   console.log("DATABASE    : D:\\DB_SPOIN\\AMANSOFTS_20_10_2025.MDF");
-  console.log("AUTH        : Windows Integrated");
-  console.log("===================================");
 });

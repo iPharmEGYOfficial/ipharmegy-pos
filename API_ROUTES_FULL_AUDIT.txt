@@ -1,0 +1,18 @@
+﻿
+LineNumber Line                                                                
+---------- ----                                                                
+       147 app.get("/", (req, res) => {                                        
+       157 app.get("/api/health", (req, res) => {                              
+       170 app.get("/api/intelligence/dashboard/taif-main", (req, res) => {    
+       193 app.get("/api/intelligence/top-selling/taif-main", (req, res) => {  
+       218 app.get("/api/intelligence/dead-stock/taif-main", (req, res) => {   
+       243 app.get("/api/intelligence/low-stock/taif-main", (req, res) => {    
+       268 app.get("/api/intelligence/profitability/taif-main", (req, res) => {
+       293 app.get("/api/intelligence/daily-sales/taif-main", (req, res) => {  
+       318 app.get("/api/intelligence/expiry-risk/taif-main", (req, res) => {  
+       345 app.get("/api/intelligence/slow-moving/taif-main", (req, res) => {  
+       372 app.get("/api/intelligence/smart-reorder/taif-main", (req, res) => {
+       402 app.get("/api/item/:barcode", (req, res) => {                       
+       426 app.post("/api/sale", (req, res) => {                               
+
+
